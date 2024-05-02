@@ -3,7 +3,13 @@ package me.amitshekhar.ridesharing.utils
 import android.content.Context
 import android.graphics.*
 import android.util.Log
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.GoogleMap
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.Marker
+import com.google.android.gms.maps.model.MarkerOptions
 import me.amitshekhar.ridesharing.R
 import kotlin.math.abs
 import kotlin.math.atan
@@ -53,4 +59,6 @@ object MapUtils {
         Log.d(TAG, "getRotation: $rotation")
         return rotation
     }
+
+
 }

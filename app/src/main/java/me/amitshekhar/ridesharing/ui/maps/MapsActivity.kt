@@ -8,7 +8,11 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.gms.common.api.Status
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -30,7 +34,10 @@ import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.widget.Autocomplete
 import com.google.android.libraries.places.widget.AutocompleteActivity
 import com.google.android.libraries.places.widget.model.AutocompleteActivityMode
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import me.amitshekhar.ridesharing.R
+import me.amitshekhar.ridesharing.data.models.LatLngNew
 import me.amitshekhar.ridesharing.data.network.NetworkService
 import me.amitshekhar.ridesharing.databinding.ActivityMapsBinding
 import me.amitshekhar.ridesharing.utils.AnimationUtils
@@ -38,6 +45,7 @@ import me.amitshekhar.ridesharing.utils.MapUtils
 import me.amitshekhar.ridesharing.utils.PermissionUtils
 import me.amitshekhar.ridesharing.utils.ViewUtils
 
+@AndroidEntryPoint
 class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
 
     companion object {
@@ -47,12 +55,16 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         private const val DROP_REQUEST_CODE = 2
     }
 
+
+    private val viewModel : MapsViewModel by viewModels()
+
     private lateinit var binding: ActivityMapsBinding
     private lateinit var presenter: MapsPresenter
     private lateinit var googleMap: GoogleMap
     private var fusedLocationProviderClient: FusedLocationProviderClient? = null
     private lateinit var locationCallback: LocationCallback
     private var currentLatLng: LatLng? = null
+
     private var pickUpLatLng: LatLng? = null
     private var dropLatLng: LatLng? = null
     private val nearbyCabMarkerList = arrayListOf<Marker>()
@@ -74,7 +86,9 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         presenter = MapsPresenter(NetworkService())
         presenter.onAttach(this)
         setUpClickListener()
+//        setupObserverGunish()
     }
+
 
     private fun setUpClickListener() {
         binding.pickUpTextView.setOnClickListener {
@@ -89,7 +103,68 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
             binding.requestCabButton.isEnabled = false
             binding.pickUpTextView.isEnabled = false
             binding.dropTextView.isEnabled = false
-            presenter.requestCab(pickUpLatLng!!, dropLatLng!!)
+//            presenter.requestCab(pickUpLatLng!!, dropLatLng!!)
+
+            val pickupLatLngNew = LatLngNew(pickUpLatLng!!.latitude,pickUpLatLng!!.longitude)
+            val dropLatLngNew = LatLngNew(dropLatLng!!.latitude,dropLatLng!!.longitude)
+            viewModel.requestCab(pickupLatLngNew,dropLatLngNew)
+//
+            lifecycleScope.launch {
+                viewModel.cabBookedEvent.collect {
+
+                    if(it){
+                        informCabBookedGunish()
+                    }
+                }
+            }
+
+            lifecycleScope.launch {
+                viewModel.pickupPathState.collect {
+                    Log.d(TAG,"path: $it")
+                    showPathGunish(it)
+                }
+            }
+
+            lifecycleScope.launch {
+                viewModel.updatedCabsFlow.collect {
+                    Log.d(TAG,"update: $it")
+                    updateCabLocationGunish(it)
+                }
+            }
+
+            lifecycleScope.launch {
+                viewModel.cabIsArrivingEvent.collect {
+                    if(it){
+                        informCabIsArrivingGunish()
+                    }
+                }
+            }
+            lifecycleScope.launch {
+                viewModel.cabArrivedEvent.collect {
+                    if(it){
+                        informCabArrivedGunish()
+                    }
+                }
+            }
+
+            lifecycleScope.launch {
+                viewModel.informTripStartEventRep.collect {
+                    if(it){
+                        informTripStartGunish()
+                    }
+                }
+            }
+
+            lifecycleScope.launch {
+                viewModel.informTripEndEventRep.collect {
+                    if(it){
+                        informTripEndGunish()
+                    }
+                }
+            }
+
+            //TODO: MVVM change
+
         }
         binding.nextRideButton.setOnClickListener {
             reset()
@@ -154,7 +229,17 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
                             enableMyLocationOnMap()
                             moveCamera(currentLatLng!!)
                             animateCamera(currentLatLng!!)
-                            presenter.requestNearbyCabs(currentLatLng!!)
+//                            presenter.requestNearbyCabs(currentLatLng!!)
+                            //TODO MVVM
+                            val currentLatLngNew = LatLngNew(location.latitude,location.longitude)
+                            viewModel.requestNearbyCabs(currentLatLngNew)
+                            lifecycleScope.launch {
+                                viewModel.latLngNewState.collect {
+                                    Log.d(TAG,it.toString())
+                                    showNearbyCabsGunish(it)
+                                }
+                            }
+
                         }
                     }
                 }
@@ -188,6 +273,8 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
             animateCamera(currentLatLng!!)
             setCurrentLocationAsPickUp()
             presenter.requestNearbyCabs(currentLatLng!!)
+
+            //TODO MVVM
         } else {
             binding.pickUpTextView.text = ""
         }
@@ -235,6 +322,8 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
 
     override fun onDestroy() {
         presenter.onDetach()
+
+        //TODO MVVM
         fusedLocationProviderClient?.removeLocationUpdates(locationCallback)
         super.onDestroy()
     }
@@ -306,6 +395,15 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         this.googleMap = googleMap
     }
 
+    private fun showNearbyCabsGunish(latLngNewList: List<me.amitshekhar.ridesharing.data.models.LatLngNew>){
+        nearbyCabMarkerList.clear()
+        for (latLng in latLngNewList) {
+            val latlng = LatLng(latLng.latitude,latLng.longitude)
+            val nearbyCabMarker = addCarMarkerAndGet(latlng)
+            nearbyCabMarkerList.add(nearbyCabMarker!!)
+        }
+    }
+
     override fun showNearbyCabs(latLngList: List<LatLng>) {
         nearbyCabMarkerList.clear()
         for (latLng in latLngList) {
@@ -314,6 +412,8 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         }
     }
 
+
+
     override fun informCabBooked() {
         nearbyCabMarkerList.forEach { it.remove() }
         nearbyCabMarkerList.clear()
@@ -321,7 +421,16 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         binding.statusTextView.text = getString(R.string.your_cab_is_booked)
     }
 
+    fun informCabBookedGunish() {
+        nearbyCabMarkerList.forEach { it.remove() }
+        nearbyCabMarkerList.clear()
+        binding.requestCabButton.visibility = View.GONE
+        binding.statusTextView.text = getString(R.string.your_cab_is_booked)
+    }
+
     override fun showPath(latLngList: List<LatLng>) {
+
+        Log.d(TAG,"cabcheck: $latLngList")
         val builder = LatLngBounds.Builder()
         for (latLng in latLngList) {
             builder.include(latLng)
@@ -342,6 +451,46 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         originMarker = addOriginDestinationMarkerAndGet(latLngList[0])
         originMarker?.setAnchor(0.5f, 0.5f)
         destinationMarker = addOriginDestinationMarkerAndGet(latLngList[latLngList.size - 1])
+        destinationMarker?.setAnchor(0.5f, 0.5f)
+
+        val polylineAnimator = AnimationUtils.polyLineAnimator()
+        polylineAnimator.addUpdateListener { valueAnimator ->
+            val percentValue = (valueAnimator.animatedValue as Int)
+            val index = (greyPolyLine?.points!!.size * (percentValue / 100.0f)).toInt()
+            blackPolyline?.points = greyPolyLine?.points!!.subList(0, index)
+        }
+        polylineAnimator.start()
+    }
+
+    fun showPathGunish(latLngList: List<LatLngNew>){
+
+        Log.d(TAG,"cabcheck: $latLngList")
+        val latLngNewList: List<LatLngNew> = latLngList
+
+        val latLngListOld: List<LatLng> = latLngNewList.map { latLngNew ->
+            LatLng(latLngNew.latitude, latLngNew.longitude)
+        }
+
+        val builder = LatLngBounds.Builder()
+        for (latLng in latLngListOld) {
+            builder.include(latLng)
+        }
+        val bounds = builder.build()
+        googleMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 2))
+        val polylineOptions = PolylineOptions()
+        polylineOptions.color(Color.GRAY)
+        polylineOptions.width(5f)
+        polylineOptions.addAll(latLngListOld)
+        greyPolyLine = googleMap.addPolyline(polylineOptions)
+
+        val blackPolylineOptions = PolylineOptions()
+        blackPolylineOptions.width(5f)
+        blackPolylineOptions.color(Color.BLACK)
+        blackPolyline = googleMap.addPolyline(blackPolylineOptions)
+
+        originMarker = addOriginDestinationMarkerAndGet(latLngListOld[0])
+        originMarker?.setAnchor(0.5f, 0.5f)
+        destinationMarker = addOriginDestinationMarkerAndGet(latLngListOld[latLngList.size - 1])
         destinationMarker?.setAnchor(0.5f, 0.5f)
 
         val polylineAnimator = AnimationUtils.polyLineAnimator()
@@ -387,11 +536,58 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         }
     }
 
+    fun updateCabLocationGunish(latlngNew: LatLngNew){
+        val latLng = LatLng(latlngNew.latitude,latlngNew.longitude)
+        if (movingCabMarker == null) {
+            movingCabMarker = addCarMarkerAndGet(latLng)
+        }
+        if (previousLatLngFromServer == null) {
+            currentLatLngFromServer = latLng
+            previousLatLngFromServer = currentLatLngFromServer
+            movingCabMarker?.position = currentLatLngFromServer!!
+            movingCabMarker?.setAnchor(0.5f, 0.5f)
+            animateCamera(currentLatLngFromServer!!)
+        } else {
+            previousLatLngFromServer = currentLatLngFromServer
+            currentLatLngFromServer = latLng
+            val valueAnimator = AnimationUtils.cabAnimator()
+            valueAnimator.addUpdateListener { va ->
+                if (currentLatLngFromServer != null && previousLatLngFromServer != null) {
+                    val multiplier = va.animatedFraction
+                    val nextLocation = LatLng(
+                        multiplier * currentLatLngFromServer!!.latitude + (1 - multiplier) * previousLatLngFromServer!!.latitude,
+                        multiplier * currentLatLngFromServer!!.longitude + (1 - multiplier) * previousLatLngFromServer!!.longitude
+                    )
+                    movingCabMarker?.position = nextLocation
+                    movingCabMarker?.setAnchor(0.5f, 0.5f)
+                    val rotation = MapUtils.getRotation(previousLatLngFromServer!!, nextLocation)
+                    if (!rotation.isNaN()) {
+                        movingCabMarker?.rotation = rotation
+                    }
+                    animateCamera(nextLocation)
+                }
+            }
+            valueAnimator.start()
+        }
+    }
+
     override fun informCabIsArriving() {
         binding.statusTextView.text = getString(R.string.your_cab_is_arriving)
     }
 
+    fun informCabIsArrivingGunish(){
+        binding.statusTextView.text = getString(R.string.your_cab_is_arriving)
+    }
+
     override fun informCabArrived() {
+        binding.statusTextView.text = getString(R.string.your_cab_has_arrived)
+        greyPolyLine?.remove()
+        blackPolyline?.remove()
+        originMarker?.remove()
+        destinationMarker?.remove()
+    }
+
+    fun informCabArrivedGunish(){
         binding.statusTextView.text = getString(R.string.your_cab_has_arrived)
         greyPolyLine?.remove()
         blackPolyline?.remove()
@@ -413,6 +609,20 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         destinationMarker?.remove()
     }
 
+     fun informTripStartGunish() {
+        binding.statusTextView.text = getString(R.string.you_are_on_a_trip)
+        previousLatLngFromServer = null
+    }
+
+     fun informTripEndGunish() {
+        binding.statusTextView.text = getString(R.string.trip_end)
+        binding.nextRideButton.visibility = View.VISIBLE
+        greyPolyLine?.remove()
+        blackPolyline?.remove()
+        originMarker?.remove()
+        destinationMarker?.remove()
+    }
+
     override fun showRoutesNotAvailableError() {
         val error = getString(R.string.route_not_available_choose_different_locations)
         Toast.makeText(this, error, Toast.LENGTH_LONG).show()
@@ -423,5 +633,7 @@ class MapsActivity : AppCompatActivity(), MapsView, OnMapReadyCallback {
         Toast.makeText(this, error, Toast.LENGTH_LONG).show()
         reset()
     }
+
+
 
 }

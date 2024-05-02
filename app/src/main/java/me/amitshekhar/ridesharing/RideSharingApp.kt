@@ -3,8 +3,10 @@ package me.amitshekhar.ridesharing
 import android.app.Application
 import com.google.android.libraries.places.api.Places
 import com.google.maps.GeoApiContext
+import dagger.hilt.android.HiltAndroidApp
 import me.amitshekhar.ridesharing.simulator.Simulator
 
+@HiltAndroidApp
 class RideSharingApp : Application() {
 
     override fun onCreate() {
